@@ -1,4 +1,4 @@
-package com.longruan.hnny.util;
+package com.geely.design;
 
 import com.longruan.hnny.scheduling.annotation.ExcelAnnotation;
 import com.longruan.hnny.scheduling.common.Const;
