@@ -9,6 +9,8 @@ import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.ss.util.CellUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -23,6 +25,7 @@ import java.util.*;
  * @date 2018/8/22
  */
 public class ExcelUtil {
+    private static Logger logger = LoggerFactory.getLogger(ExcelUtil.class);
 
     public static <E> HSSFWorkbook exportExcel(String tableName, List<E> dataSet) {
         HSSFWorkbook hssfWorkbook = null;
@@ -33,53 +36,36 @@ public class ExcelUtil {
             String datePattern = (String) sheetInfoMap.get("datePattern");
             boolean counted = (boolean) sheetInfoMap.get("counted");
             List<HeaderNode> headerNodeList = ExcelUtil.assembleHeaderNode(dataSet.get(0));
-            List<String> notExtensibleHeaderNameList = ExcelUtil.getNotExtensibleHeaderNameList(headerNodeList);
-            if (!notExtensibleHeaderNameList.isEmpty()) {
+            if (!headerNodeList.isEmpty()) {
                 if (counted) {
+                    ExcelUtil.increasePreNotExtensibleHeaderNodeSum(headerNodeList);
                     HeaderNode headerNodeForCountColumn = new HeaderNode();
                     headerNodeForCountColumn.setHeaderName(Const.COUNT);
                     headerNodeForCountColumn.setIndex(-1);
                     headerNodeForCountColumn.setLevel(0);
                     headerNodeForCountColumn.setExtensible(false);
-                    headerNodeForCountColumn.setPreNotExtensibleHeaderNodeNum(0);
-                    headerNodeForCountColumn.setSubNotExtensibleHeaderNodeNum(0);
+                    headerNodeForCountColumn.setPreNotExtensibleHeaderNodeSum(0);
+                    headerNodeForCountColumn.setSubNotExtensibleHeaderNodeSum(0);
                     headerNodeList.add(0, headerNodeForCountColumn);
-                    notExtensibleHeaderNameList.add(0, Const.COUNT);
                 }
+                List<String> notExtensibleHeaderNameList = ExcelUtil.getNotExtensibleHeaderNameList(headerNodeList);
                 int columnSum = notExtensibleHeaderNameList.size();
                 hssfWorkbook = new HSSFWorkbook();
                 HSSFSheet hssfSheet = hssfWorkbook.createSheet(sheetName);
                 /*1.标题行设置*/
                 HSSFRow hssfRow = hssfSheet.createRow(rowIndex);
-                rowIndex++;
                 ExcelUtil.setRowHeight(Const.RowType.TABLE_NAME, hssfRow);
                 CellRangeAddress cellRangeAddress = new CellRangeAddress(rowIndex, rowIndex, 0, columnSum - 1);
                 hssfSheet.addMergedRegion(cellRangeAddress);
                 Cell cell = CellUtil.createCell(hssfRow, 0, tableName);
-                ExcelUtil.setCellStyleForMergeRegion(cellRangeAddress, cell, Const.RowType.TABLE_HEAD, hssfSheet, hssfWorkbook);
+                ExcelUtil.setCellStyleForMergeRegion(cellRangeAddress, cell, Const.RowType.TABLE_NAME, hssfSheet, hssfWorkbook);
+                rowIndex++;
                 /*2.表头行设置*/
-                // 可以直接调用createHeader方法，
-                List<HSSFRow> headerRowList = ExcelUtil.createHeader(headerNodeList, hssfSheet, hssfWorkbook, rowIndex);
+                List<HSSFRow> headerRowList = ExcelUtil.createHeaderRows(headerNodeList, hssfSheet, hssfWorkbook, rowIndex);
                 rowIndex += headerRowList.size();
-                // boolean singleLineHeader = notExtensibleHeaderNameList.size() == headerNodeList.size();
-                // if (singleLineHeader) {
-                //     hssfRow = hssfSheet.createRow(rowIndex);
-                //     rowIndex++;
-                //     ExcelUtil.setRowHeight(Const.RowType.TABLE_HEAD, hssfRow);
-                //     HSSFCell[] hssfCells = new HSSFCell[columnSum];
-                //     for (int i = 0; i < hssfCells.length; i++) {
-                //         hssfCells[i] = hssfRow.createCell(i);
-                //         hssfCells[i].setCellValue(new HSSFRichTextString(notExtensibleHeaderNameList.get(i)));
-                //         ExcelUtil.setCellStyle(hssfWorkbook, hssfCells[i], Const.RowType.TABLE_HEAD);
-                //     }
-                // } else {
-                //     List<HSSFRow> headerRowList = ExcelUtil.createHeader(headerNodeList, hssfSheet, hssfWorkbook, rowIndex);
-                //     rowIndex += headerRowList.size();
-                // }
                 /*3.内容行设置*/
                 ExcelUtil.createContentRows(rowIndex, counted, columnSum, datePattern, headerNodeList, dataSet, hssfSheet, hssfWorkbook);
             }
-
         }
         return hssfWorkbook;
     }
@@ -90,13 +76,15 @@ public class ExcelUtil {
             ExcelAnnotation excelAnnotation = (ExcelAnnotation) e.getClass().getAnnotations()[0];
             sheetInfoMap.put("sheetName", excelAnnotation.sheetName());
             sheetInfoMap.put("datePattern", excelAnnotation.datePattern());
-            sheetInfoMap.put("count", excelAnnotation.count());
+            sheetInfoMap.put("counted", excelAnnotation.counted());
         }
+        logger.info("sheet信息：" + sheetInfoMap.toString());
         return sheetInfoMap;
     }
 
     private static <E> List<HeaderNode> assembleHeaderNode(E e) {
         List<HeaderInfo> headerInfoList = ExcelUtil.getHeaderInfo(e);
+        logger.info("headerInfoList:" + headerInfoList.toString());
         List<HeaderNode> headerNodeList = new ArrayList<>();
         HeaderNode headerNode;
         if (headerInfoList.size() > 0) {
@@ -107,12 +95,19 @@ public class ExcelUtil {
                 headerNode.setLevel(item.getLevel());
                 headerNode.setParentIndex(item.getParentIndex());
                 headerNode.setExtensible(isExtensible(item, headerInfoList));
-                headerNode.setPreNotExtensibleHeaderNodeNum(getPreNotExtensibleHeaderNodeNum(item, headerInfoList));
-                headerNode.setSubNotExtensibleHeaderNodeNum(getSubNotExtensibleHeaderNodeNum(item, headerInfoList));
+                headerNode.setPreNotExtensibleHeaderNodeSum(getPreNotExtensibleHeaderNodeSum(item, headerInfoList));
+                headerNode.setSubNotExtensibleHeaderNodeSum(getSubNotExtensibleHeaderNodeSum(item, headerInfoList));
                 headerNodeList.add(headerNode);
             }
         }
+        logger.info("headerNodeList:" + headerNodeList.toString());
         return headerNodeList;
+    }
+
+    private static void increasePreNotExtensibleHeaderNodeSum(List<HeaderNode> headerNodeList) {
+        for (HeaderNode item : headerNodeList) {
+            item.setPreNotExtensibleHeaderNodeSum(item.getPreNotExtensibleHeaderNodeSum() + 1);
+        }
     }
 
     private static List<String> getNotExtensibleHeaderNameList(List<HeaderNode> headerNodeList) {
@@ -135,7 +130,7 @@ public class ExcelUtil {
     private static void setRowHeight(String rowType, HSSFRow hssfRow) {
         if (Const.RowType.TABLE_NAME.equals(rowType)) {
             hssfRow.setHeight((short) (36 * 20));
-        } else if (Const.RowType.TABLE_HEAD.equals(rowType)) {
+        } else if (Const.RowType.TABLE_HEADER.equals(rowType)) {
             hssfRow.setHeight((short) (20 * 20));
         } else if (Const.RowType.TABLE_CONTENT.equals(rowType)) {
             hssfRow.setHeight((short) (20 * 20));
@@ -175,37 +170,45 @@ public class ExcelUtil {
         HSSFRegionUtil.setBorderBottom(CellStyle.BORDER_THIN, cellRangeAddress, hssfSheet, hssfWorkbook);
     }
 
-    private static List<HSSFRow> createHeader(List<HeaderNode> headerNodeList, HSSFSheet hssfSheet, HSSFWorkbook hssfWorkbook, int startIndex) {
+    /**
+     * 生成表头行，支持单行与多行表头，（无排序要求）
+     * @param headerNodeList
+     * @param hssfSheet
+     * @param hssfWorkbook
+     * @param startIndex
+     * @return
+     */
+    private static List<HSSFRow> createHeaderRows(List<HeaderNode> headerNodeList, HSSFSheet hssfSheet, HSSFWorkbook hssfWorkbook, int startIndex) {
         List<HSSFRow> headerRowList = new ArrayList<>();
         if (headerNodeList.size() > 0) {
             int deep = ExcelUtil.getHeaderDeep(headerNodeList);
             HSSFRow hssfRow;
             for (int i = 0; i < deep + 1; i++) {
                 hssfRow = hssfSheet.createRow(startIndex + i);
-                ExcelUtil.setRowHeight(Const.RowType.TABLE_HEAD, hssfRow);
+                ExcelUtil.setRowHeight(Const.RowType.TABLE_HEADER, hssfRow);
                 headerRowList.add(hssfRow);
             }
             String headerName;
-            int level = 0;
-            int preNotExtensibleHeaderNodeNum;
-            int subNotExtensibleHeaderNodeNum;
+            int level;
+            int preNotExtensibleHeaderNodeSum;
+            int subNotExtensibleHeaderNodeSum;
             CellRangeAddress cellRangeAddress;
             Cell cell;
-            for (HeaderNode headerNode : headerNodeList) {
-                headerName = headerNode.getHeaderName();
-                level = headerNode.getLevel();
-                preNotExtensibleHeaderNodeNum = headerNode.getPreNotExtensibleHeaderNodeNum();
-                subNotExtensibleHeaderNodeNum = headerNode.getSubNotExtensibleHeaderNodeNum();
-                if (headerNode.isExtensible()) {
+            for (HeaderNode item : headerNodeList) {
+                headerName = item.getHeaderName();
+                level = item.getLevel();
+                preNotExtensibleHeaderNodeSum = item.getPreNotExtensibleHeaderNodeSum();
+                subNotExtensibleHeaderNodeSum = item.getSubNotExtensibleHeaderNodeSum();
+                if (item.isExtensible()) {
                     cellRangeAddress = new CellRangeAddress(startIndex + level, startIndex + level,
-                            preNotExtensibleHeaderNodeNum, preNotExtensibleHeaderNodeNum + subNotExtensibleHeaderNodeNum - 1);
+                            preNotExtensibleHeaderNodeSum, preNotExtensibleHeaderNodeSum + subNotExtensibleHeaderNodeSum - 1);
                 } else {
                     cellRangeAddress = new CellRangeAddress(startIndex + level,
-                            startIndex + deep, preNotExtensibleHeaderNodeNum, preNotExtensibleHeaderNodeNum);
+                            startIndex + deep, preNotExtensibleHeaderNodeSum, preNotExtensibleHeaderNodeSum);
                 }
                 hssfSheet.addMergedRegion(cellRangeAddress);
-                cell = CellUtil.createCell(headerRowList.get(level), preNotExtensibleHeaderNodeNum, headerName);
-                ExcelUtil.setCellStyleForMergeRegion(cellRangeAddress, cell, Const.RowType.TABLE_HEAD, hssfSheet, hssfWorkbook);
+                cell = CellUtil.createCell(headerRowList.get(level), preNotExtensibleHeaderNodeSum, headerName);
+                ExcelUtil.setCellStyleForMergeRegion(cellRangeAddress, cell, Const.RowType.TABLE_HEADER, hssfSheet, hssfWorkbook);
             }
         }
         return headerRowList;
@@ -213,70 +216,75 @@ public class ExcelUtil {
 
     private static <E> void createContentRows(int startIndex, boolean counted, int columnSum, String pattern, List<HeaderNode> headerNodeList,
                                               List<E> dataSet, HSSFSheet hssfSheet, HSSFWorkbook hssfWorkbook) {
-        HSSFRow hssfRow = null;
+        HSSFRow hssfRow;
         HSSFCell[] hssfCells = new HSSFCell[columnSum];
         for (int i = 0; i < dataSet.size(); i++) {
             hssfRow = hssfSheet.createRow(i + startIndex);
             ExcelUtil.setRowHeight(Const.RowType.TABLE_CONTENT, hssfRow);
             Object temp = dataSet.get(i);
             List<Object> fieldValueList = ExcelUtil.getRowValueList(temp, headerNodeList);
-            Object value;
+            if (i == 0) {
+                logger.info("首行单元值序列：" + fieldValueList.toString());
+            }
+            Object cellValue;
             int k = 0;
             if (counted) {
                 hssfCells[0] = hssfRow.createCell(0);
                 ExcelUtil.setCellStyle(hssfWorkbook, hssfCells[0], Const.RowType.TABLE_CONTENT);
                 hssfCells[0].setCellValue(i + 1);
-                hssfSheet.autoSizeColumn(0);
+                hssfSheet.autoSizeColumn(0, true);
                 k++;
             }
             for (int j = k; j < columnSum; j++) {
                 hssfCells[j] = hssfRow.createCell(j);
                 ExcelUtil.setCellStyle(hssfWorkbook, hssfCells[j], Const.RowType.TABLE_CONTENT);
-                value = fieldValueList.get(j - k);
-                if (value == null) {
+                cellValue = fieldValueList.get(j - k);
+                if (cellValue == null) {
                     hssfCells[j].setCellValue("");
-                } else if (value instanceof Integer) {
-                    hssfCells[j].setCellValue((Integer)value);
-                } else if (value instanceof Double) {
-                    hssfCells[j].setCellValue((Double) value);
-                } else if (value instanceof Float) {
-                    hssfCells[j].setCellValue((Float) value);
-                } else if (value instanceof Long) {
-                    hssfCells[j].setCellValue((Long) value);
-                } else if (value instanceof Boolean) {
-                    hssfCells[j].setCellValue((Boolean) value ? "是" : "否");
-                } else if (value instanceof Date) {
-                    hssfCells[j].setCellValue(new SimpleDateFormat(StringUtils.isNotBlank(pattern) ? pattern : "yyyy-mm-dd").format((Date) value));
+                } else if (cellValue instanceof Integer) {
+                    hssfCells[j].setCellValue((Integer) cellValue);
+                } else if (cellValue instanceof Long) {
+                    hssfCells[j].setCellValue((Long) cellValue);
+                } else if (cellValue instanceof Double) {
+                    hssfCells[j].setCellValue((Double) cellValue);
+                } else if (cellValue instanceof Float) {
+                    hssfCells[j].setCellValue((Float) cellValue);
+                } else if (cellValue instanceof Boolean) {
+                    hssfCells[j].setCellValue((Boolean) cellValue ? "是" : "否");
+                } else if (cellValue instanceof Date) {
+                    hssfCells[j].setCellValue(new SimpleDateFormat(StringUtils.isNotBlank(pattern) ? pattern : "yyyy-mm-dd").format((Date) cellValue));
                 } else {
-                    hssfCells[j].setCellValue(String.valueOf(value));
+                    hssfCells[j].setCellValue(String.valueOf(cellValue));
                 }
-                hssfSheet.autoSizeColumn(j);
+                hssfSheet.autoSizeColumn(j, true);
             }
         }
     }
 
     private static <E> List<HeaderInfo> getHeaderInfo(E e) {
-        List<HeaderInfo> headerInfoList = new ArrayList<>();
+        Map<Integer, HeaderInfo> map = new TreeMap<>();
         if (e != null) {
-            HeaderInfo headerInfo = new HeaderInfo();
             Field[] fields = e.getClass().getDeclaredFields();
+            HeaderInfo headerInfo;
             ExcelAnnotation excelAnnotation;
-            for (int i = 0; i < fields.length; i++) {
-                if (fields[i].getAnnotations().length != 0) {
-                    excelAnnotation = (ExcelAnnotation) fields[i].getAnnotations()[0];
+            for (Field field : fields) {
+                if (field.getAnnotations().length != 0) {
+                    headerInfo = new HeaderInfo();
+                    excelAnnotation = (ExcelAnnotation) field.getAnnotations()[0];
                     headerInfo.setHeaderName(excelAnnotation.headerName());
                     headerInfo.setIndex(excelAnnotation.index());
                     headerInfo.setLevel(excelAnnotation.level());
                     headerInfo.setParentIndex(excelAnnotation.parentIndex());
-                    headerInfoList.add(headerInfo);
+                    map.put(excelAnnotation.index(), headerInfo);
                 }
             }
         }
-        return headerInfoList;
+        return ExcelUtil.sortByKey(map);
     }
 
     /**
-     * 判断节点是否可扩展，即对应表头下是否含有子表头
+     * 判断节点是否可扩展，即对应表头下是否含有子表头，也可以调用getSubNotExtensibleHeaderNodeSum方法，
+     * 通过判断其值是否为零来判断当前节点是否可扩展
      * @param headerInfo
      * @param headerInfoList
      * @return
@@ -293,17 +301,18 @@ public class ExcelUtil {
     /**
      * 获得当前节点之前（或者空间左侧）不可扩展节点的数量，
      * 前提是headerInfoList中表头单元信息对象存储的先后顺序，需遵循基于对应表头单元空间位置先左后右，从上往下（或先父后子）的原则
+     * 反映在headerInfoList中就是其元素以index由小到大顺序存储，（getHeaderInfo方法中已做此处理）
      * @param headerInfo
      * @param headerInfoList
      * @return
      */
-    private static int getPreNotExtensibleHeaderNodeNum(HeaderInfo headerInfo, List<HeaderInfo> headerInfoList) {
+    private static int getPreNotExtensibleHeaderNodeSum(HeaderInfo headerInfo, List<HeaderInfo> headerInfoList) {
         int count = 0;
         for (int i = 0; i < headerInfoList.size(); i++) {
             if (headerInfo.equals(headerInfoList.get(i))) {
                 break;
             }
-            if (isExtensible(headerInfo, headerInfoList)) {
+            if (!isExtensible(headerInfoList.get(i), headerInfoList)) {
                 count++;
             }
         }
@@ -311,20 +320,19 @@ public class ExcelUtil {
     }
 
     /**
-     * 获得当前节点下侧不可扩展节点的数量，
-     * 前提是headerInfoList中表头单元信息对象存储的先后顺序，需遵循基于对应表头单元空间位置先左后右，从上往下（或先父后子）的原则
+     * 获得当前节点下侧不可扩展节点的数量，（无排序要求）
      * @param headerInfo
      * @param headerInfoList
      * @return
      */
-    private static int getSubNotExtensibleHeaderNodeNum(HeaderInfo headerInfo, List<HeaderInfo> headerInfoList) {
+    private static int getSubNotExtensibleHeaderNodeSum(HeaderInfo headerInfo, List<HeaderInfo> headerInfoList) {
         int count = 0;
         for (int i = 0; i < headerInfoList.size(); i++) {
             if (headerInfo.getIndex() == headerInfoList.get(i).getParentIndex()) {
                 if (!isExtensible(headerInfoList.get(i), headerInfoList)) {
                     count++;
                 } else {
-                    count += getSubNotExtensibleHeaderNodeNum(headerInfoList.get(i), headerInfoList);
+                    count += getSubNotExtensibleHeaderNodeSum(headerInfoList.get(i), headerInfoList);
                 }
             }
         }
@@ -334,19 +342,13 @@ public class ExcelUtil {
     private static void setFont(String cellType, HSSFFont hssfFont) {
         if (hssfFont != null) {
             if (Const.RowType.TABLE_NAME.equals(cellType)) {
-                // 设置字体类型
                 hssfFont.setFontName("宋体");
-                // 设置字体高度
                 hssfFont.setFontHeightInPoints((short) 18);
-            } else if (Const.RowType.TABLE_HEAD.equals(cellType)) {
-                // 设置字体类型
+            } else if (Const.RowType.TABLE_HEADER.equals(cellType)) {
                 hssfFont.setFontName("宋体");
-                // 设置字体高度
                 hssfFont.setFontHeightInPoints((short) 11);
             } else if (Const.RowType.TABLE_CONTENT.equals(cellType)) {
-                // 设置字体类型
                 hssfFont.setFontName("宋体");
-                // 设置字体高度
                 hssfFont.setFontHeightInPoints((short) 10);
             } else {
                 // 设置字体类型
@@ -362,9 +364,9 @@ public class ExcelUtil {
 
     private static int getHeaderDeep(List<HeaderNode> headerNodeList) {
         int deep = 0;
-        for (int i = 0; i < headerNodeList.size(); i++) {
-            if (headerNodeList.get(i).getLevel() > deep) {
-                deep = headerNodeList.get(i).getLevel();
+        for (HeaderNode item : headerNodeList) {
+            if (item.getLevel() > deep) {
+                deep = item.getLevel();
             }
         }
         return deep;
@@ -448,8 +450,8 @@ public class ExcelUtil {
         return false;
     }
 
-    private static List<Object> sortByKey(Map<Integer, Object> map) {
-        List<Object> list = new ArrayList<>();
+    private static <E> List<E> sortByKey(Map<Integer, E> map) {
+        List<E> list = new ArrayList<>();
         Set<Integer> keySet = map.keySet();
         for (Integer key : keySet) {
             list.add(map.get(key));
@@ -504,6 +506,16 @@ public class ExcelUtil {
         public void setParentIndex(int parentIndex) {
             this.parentIndex = parentIndex;
         }
+
+        @Override
+        public String toString() {
+            return "HeaderInfo{" +
+                    "headerName='" + headerName + '\'' +
+                    ", index=" + index +
+                    ", level=" + level +
+                    ", parentIndex=" + parentIndex +
+                    '}';
+        }
     }
 
     static class HeaderNode {
@@ -512,21 +524,21 @@ public class ExcelUtil {
         private int level;
         private int parentIndex;
         private boolean extensible;
-        private int preNotExtensibleHeaderNodeNum;
-        private int subNotExtensibleHeaderNodeNum;
+        private int preNotExtensibleHeaderNodeSum;
+        private int subNotExtensibleHeaderNodeSum;
 
         public HeaderNode() {
         }
 
         public HeaderNode(String headerName, int index, int level, int parentIndex, boolean extensible,
-                          int preNotExtensibleHeaderNodeNum, int subNotExtensibleHeaderNodeNum) {
+                          int preNotExtensibleHeaderNodeSum, int subNotExtensibleHeaderNodeSum) {
             this.headerName = headerName;
             this.index = index;
             this.level = level;
             this.parentIndex = parentIndex;
             this.extensible = extensible;
-            this.preNotExtensibleHeaderNodeNum = preNotExtensibleHeaderNodeNum;
-            this.subNotExtensibleHeaderNodeNum = subNotExtensibleHeaderNodeNum;
+            this.preNotExtensibleHeaderNodeSum = preNotExtensibleHeaderNodeSum;
+            this.subNotExtensibleHeaderNodeSum = subNotExtensibleHeaderNodeSum;
         }
 
         public String getHeaderName() {
@@ -569,20 +581,33 @@ public class ExcelUtil {
             this.extensible = extensible;
         }
 
-        public int getPreNotExtensibleHeaderNodeNum() {
-            return preNotExtensibleHeaderNodeNum;
+        public int getPreNotExtensibleHeaderNodeSum() {
+            return preNotExtensibleHeaderNodeSum;
         }
 
-        public void setPreNotExtensibleHeaderNodeNum(int preNotExtensibleHeaderNodeNum) {
-            this.preNotExtensibleHeaderNodeNum = preNotExtensibleHeaderNodeNum;
+        public void setPreNotExtensibleHeaderNodeSum(int preNotExtensibleHeaderNodeSum) {
+            this.preNotExtensibleHeaderNodeSum = preNotExtensibleHeaderNodeSum;
         }
 
-        public int getSubNotExtensibleHeaderNodeNum() {
-            return subNotExtensibleHeaderNodeNum;
+        public int getSubNotExtensibleHeaderNodeSum() {
+            return subNotExtensibleHeaderNodeSum;
         }
 
-        public void setSubNotExtensibleHeaderNodeNum(int subNotExtensibleHeaderNodeNum) {
-            this.subNotExtensibleHeaderNodeNum = subNotExtensibleHeaderNodeNum;
+        public void setSubNotExtensibleHeaderNodeSum(int subNotExtensibleHeaderNodeSum) {
+            this.subNotExtensibleHeaderNodeSum = subNotExtensibleHeaderNodeSum;
+        }
+
+        @Override
+        public String toString() {
+            return "HeaderNode{" +
+                    "headerName='" + headerName + '\'' +
+                    ", index=" + index +
+                    ", level=" + level +
+                    ", parentIndex=" + parentIndex +
+                    ", extensible=" + extensible +
+                    ", preNotExtensibleHeaderNodeSum=" + preNotExtensibleHeaderNodeSum +
+                    ", subNotExtensibleHeaderNodeSum=" + subNotExtensibleHeaderNodeSum +
+                    '}';
         }
     }
 }
